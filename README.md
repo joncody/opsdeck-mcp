@@ -173,3 +173,9 @@ pnpm e2e
 - `scripts/` - Development stack launcher (`opsdeck-dev.sh`) coordinating ordered startup and shutdown of all four services.
 - `docs/` - UI and Jaeger distributed trace screenshots referenced in this README.
 - `tests/e2e/` - Playwright end-to-end browser test suite (`opsdeck.spec.ts`).
+
+---
+
+## 📜 License
+
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
