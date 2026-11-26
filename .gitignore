@@ -1,0 +1,30 @@
+# Rust
+/target/
+
+# Node / pnpm / TypeScript / Vite
+node_modules/
+.pnpm-store/
+dist/
+.vite/
+*.tsbuildinfo
+
+# Go binaries & test outputs
+/apps/gateway/gateway
+/apps/gateway/*.test
+coverage.out
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+
+# Environment & logs
+.env
+.env.*
+!.env.example
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

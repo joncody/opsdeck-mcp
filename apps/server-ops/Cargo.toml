@@ -1,0 +1,35 @@
+[package]
+name = "opsdeck-server-ops"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "opsdeck-server-ops"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+axum = "0.8"
+chrono.workspace = true
+jsonwebtoken = { version = "11", features = ["aws_lc_rs"] }
+opentelemetry = "0.31"
+opentelemetry-http = "0.31"
+opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic"] }
+opentelemetry_sdk = { version = "0.31", features = ["rt-tokio"] }
+rmcp = { workspace = true, features = ["server", "macros", "schemars", "transport-io", "transport-async-rw", "transport-streamable-http-server", "request-state"] }
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+tokio = { workspace = true, features = ["net", "time"] }
+tracing.workspace = true
+tracing-opentelemetry = "0.32"
+tracing-subscriber = { workspace = true, features = ["registry"] }
+url = "2.5"
+uuid.workspace = true
+
+[dev-dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+rmcp = { workspace = true, features = ["client", "transport-async-rw", "transport-streamable-http-client-reqwest"] }

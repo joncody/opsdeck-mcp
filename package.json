@@ -1,0 +1,27 @@
+{
+  "name": "opsdeck-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "infra:up": "docker compose up -d",
+    "infra:down": "docker compose down",
+    "infra:logs": "docker compose logs -f",
+    "dev": "bash scripts/opsdeck-dev.sh",
+    "db:psql": "docker compose exec postgres psql -U opsdeck -d opsdeck",
+    "db:reset": "docker compose down -v && docker compose up -d",
+    "server-ops:check": "cargo check -p opsdeck-server-ops",
+    "server-ops:test": "cargo test -p opsdeck-server-ops",
+    "server-ops:build": "cargo build --release -p opsdeck-server-ops",
+    "server-ops:inspector": "npx @modelcontextprotocol/inspector ./target/debug/opsdeck-server-ops --stdio",
+    "gateway:test": "cd apps/gateway && go test -v ./...",
+    "typecheck": "pnpm -r typecheck",
+    "e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0"
+  }
+}
