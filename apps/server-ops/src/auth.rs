@@ -25,15 +25,33 @@ pub struct AuthConfig {
     pub metadata_uri: String,
     pub issuer: String,
     pub jwt_secret: Vec<u8>,
+    encoding_key: EncodingKey,
+    decoding_key: DecodingKey,
+    validation: Validation,
 }
 
 impl AuthConfig {
-    pub fn new(resource_uri: String, metadata_uri: String, issuer: String, jwt_secret: Vec<u8>) -> Self {
+    pub fn new(
+        resource_uri: String,
+        metadata_uri: String,
+        issuer: String,
+        jwt_secret: Vec<u8>,
+    ) -> Self {
+        let encoding_key = EncodingKey::from_secret(&jwt_secret);
+        let decoding_key = DecodingKey::from_secret(&jwt_secret);
+        let mut validation = Validation::new(Algorithm::HS256);
+        validation.set_audience(&[resource_uri.as_str()]);
+        validation.set_issuer(&[issuer.as_str()]);
+        validation.set_required_spec_claims(&["exp", "aud", "iss", "sub"]);
+
         Self {
             resource_uri,
             metadata_uri,
             issuer,
             jwt_secret,
+            encoding_key,
+            decoding_key,
+            validation,
         }
     }
 }
@@ -155,23 +173,14 @@ pub fn mint_token(
     let token = encode(
         &Header::new(Algorithm::HS256),
         &claims,
-        &EncodingKey::from_secret(&config.jwt_secret),
+        &config.encoding_key,
     )?;
     Ok(token)
 }
 
 pub fn verify_bearer_token(config: &AuthConfig, token: &str) -> Result<AuthClaims, String> {
-    let mut validation = Validation::new(Algorithm::HS256);
-    validation.set_audience(&[config.resource_uri.as_str()]);
-    validation.set_issuer(&[config.issuer.as_str()]);
-    validation.set_required_spec_claims(&["exp", "aud", "iss", "sub"]);
-
-    let data = decode::<AuthClaims>(
-        token,
-        &DecodingKey::from_secret(&config.jwt_secret),
-        &validation,
-    )
-    .map_err(|err| format!("Token verification failed: {err}"))?;
+    let data = decode::<AuthClaims>(token, &config.decoding_key, &config.validation)
+        .map_err(|err| format!("Token verification failed: {err}"))?;
 
     Ok(data.claims)
 }
@@ -190,7 +199,9 @@ fn unauthorized_response(metadata_uri: &str, error: &str, description: &str) -> 
         .into_response();
 
     if let Ok(value) = HeaderValue::from_str(&challenge) {
-        response.headers_mut().insert(header::WWW_AUTHENTICATE, value);
+        response
+            .headers_mut()
+            .insert(header::WWW_AUTHENTICATE, value);
     }
     response
 }
@@ -221,11 +232,7 @@ pub async fn bearer_auth_middleware(
     };
 
     if token.is_empty() {
-        return unauthorized_response(
-            &config.metadata_uri,
-            "invalid_token",
-            "Empty Bearer token",
-        );
+        return unauthorized_response(&config.metadata_uri, "invalid_token", "Empty Bearer token");
     }
 
     match verify_bearer_token(&config, token) {
@@ -237,7 +244,9 @@ pub async fn bearer_auth_middleware(
     }
 }
 
-pub async fn protected_resource_metadata(State(config): State<Arc<AuthConfig>>) -> Json<serde_json::Value> {
+pub async fn protected_resource_metadata(
+    State(config): State<Arc<AuthConfig>>,
+) -> Json<serde_json::Value> {
     Json(json!({
         "resource": config.resource_uri,
         "authorization_servers": [config.issuer],
@@ -247,7 +256,9 @@ pub async fn protected_resource_metadata(State(config): State<Arc<AuthConfig>>) 
     }))
 }
 
-pub async fn auth_server_metadata(State(config): State<Arc<AuthConfig>>) -> Json<serde_json::Value> {
+pub async fn auth_server_metadata(
+    State(config): State<Arc<AuthConfig>>,
+) -> Json<serde_json::Value> {
     let issuer = config.issuer.trim_end_matches('/');
     Json(json!({
         "issuer": config.issuer,
@@ -268,14 +279,21 @@ pub async fn issue_dev_token(
     if client_id.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "invalid_client", "error_description": "client_id is required" })),
+            Json(
+                json!({ "error": "invalid_client", "error_description": "client_id is required" }),
+            ),
         )
             .into_response();
     }
 
-    if (client_id.starts_with("http://") || client_id.starts_with("https://"))
-        && let Err(reason) = validate_cimd_url(client_id)
-    {
+    let is_http_scheme = client_id
+        .get(..7)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("http://"))
+        || client_id
+            .get(..8)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("https://"));
+
+    if is_http_scheme && let Err(reason) = validate_cimd_url(client_id) {
         return (
             StatusCode::BAD_REQUEST,
             Json(json!({ "error": "invalid_client_metadata", "error_description": reason })),
@@ -299,7 +317,14 @@ pub async fn issue_dev_token(
     let ttl_secs = body.ttl_secs.unwrap_or(900).clamp(10, 3600);
     let sub = body.sub.unwrap_or_else(|| client_id.to_owned());
 
-    match mint_token(&config, client_id, &sub, resource, &requested_scope, ttl_secs) {
+    match mint_token(
+        &config,
+        client_id,
+        &sub,
+        resource,
+        &requested_scope,
+        ttl_secs,
+    ) {
         Ok(access_token) => Json(DevTokenResponse {
             access_token,
             token_type: "Bearer",

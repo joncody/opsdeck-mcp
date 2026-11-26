@@ -59,12 +59,29 @@ pub struct RunbookRecord {
     pub updated_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct RunbookSummary {
+    pub slug: String,
+    pub title: String,
+    pub category: String,
+    pub updated_at: DateTime<Utc>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ServiceDetail {
     pub service: ServiceRecord,
     pub recent_deployments: Vec<DeploymentRecord>,
     pub active_incidents: Vec<IncidentRecord>,
+}
+
+#[derive(FromRow)]
+struct DiagnosticProbeRow {
+    status: Option<String>,
+    current_version: Option<String>,
+    open_incident_count: i64,
+    active_pg_connections: i64,
 }
 
 #[derive(Clone)]
@@ -92,7 +109,10 @@ impl OpsStore {
         Ok(Self { pool })
     }
 
-    pub async fn list_services(&self, status: Option<&str>) -> Result<Vec<ServiceRecord>, sqlx::Error> {
+    pub async fn list_services(
+        &self,
+        status: Option<&str>,
+    ) -> Result<Vec<ServiceRecord>, sqlx::Error> {
         sqlx::query_as::<_, ServiceRecord>(
             r#"
             SELECT id, name, tier, owner_team, repo_url, status, current_version, updated_at
@@ -112,7 +132,10 @@ impl OpsStore {
             .await
     }
 
-    pub async fn get_service_detail(&self, name: &str) -> Result<Option<ServiceDetail>, sqlx::Error> {
+    pub async fn get_service_detail(
+        &self,
+        name: &str,
+    ) -> Result<Option<ServiceDetail>, sqlx::Error> {
         let service = sqlx::query_as::<_, ServiceRecord>(
             r#"
             SELECT id, name, tier, owner_team, repo_url, status, current_version, updated_at
@@ -182,6 +205,21 @@ impl OpsStore {
         )
         .bind(status)
         .bind(severity)
+        .fetch_all(&self.pool)
+        .await
+    }
+
+    pub async fn list_open_incidents(&self) -> Result<Vec<IncidentRecord>, sqlx::Error> {
+        sqlx::query_as::<_, IncidentRecord>(
+            r#"
+            SELECT i.id, i.service_id, s.name AS service_name, i.title, i.severity,
+                   i.status, i.summary, i.commander, i.created_at, i.resolved_at
+            FROM incidents i
+            JOIN services s ON s.id = i.service_id
+            WHERE i.status IN ('open', 'mitigating')
+            ORDER BY i.created_at DESC
+            "#,
+        )
         .fetch_all(&self.pool)
         .await
     }
@@ -297,10 +335,10 @@ impl OpsStore {
         .await
     }
 
-    pub async fn list_runbooks(&self) -> Result<Vec<RunbookRecord>, sqlx::Error> {
-        sqlx::query_as::<_, RunbookRecord>(
+    pub async fn list_runbook_summaries(&self) -> Result<Vec<RunbookSummary>, sqlx::Error> {
+        sqlx::query_as::<_, RunbookSummary>(
             r#"
-            SELECT id, slug, service_id, title, category, content_md, updated_at
+            SELECT slug, title, category, updated_at
             FROM runbooks
             ORDER BY category ASC, slug ASC
             "#,
@@ -438,6 +476,7 @@ impl OpsStore {
         .await?;
 
         let Some(target_commit) = target_commit else {
+            tx.rollback().await?;
             let known_versions = sqlx::query_scalar::<_, String>(
                 r#"
                 SELECT DISTINCT version
@@ -447,9 +486,8 @@ impl OpsStore {
                 "#,
             )
             .bind(service.id)
-            .fetch_all(&mut *tx)
+            .fetch_all(&self.pool)
             .await?;
-            tx.rollback().await?;
             return Ok(Err(format!(
                 "No production deployment found for '{service_name}' at version '{target_version}'. Known versions: {}",
                 known_versions.join(", ")
@@ -511,20 +549,35 @@ impl OpsStore {
     }
 
     pub async fn run_diagnostic_probe(&self, service_name: &str) -> Result<Value, sqlx::Error> {
-        let active_pg_connections = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*)::BIGINT FROM pg_stat_activity WHERE datname = current_database()",
+        let row = sqlx::query_as::<_, DiagnosticProbeRow>(
+            r#"
+            SELECT
+                s.status,
+                s.current_version,
+                COALESCE(
+                    (SELECT COUNT(*)::BIGINT
+                     FROM incidents i
+                     WHERE i.service_id = s.id AND i.status <> 'resolved'),
+                    0
+                ) AS open_incident_count,
+                (SELECT COUNT(*)::BIGINT
+                 FROM pg_stat_activity
+                 WHERE datname = current_database()) AS active_pg_connections
+            FROM (SELECT $1::TEXT AS target_name) q
+            LEFT JOIN services s ON s.name = q.target_name
+            "#,
         )
+        .bind(service_name)
         .fetch_one(&self.pool)
         .await?;
 
-        let detail = self.get_service_detail(service_name).await?;
         Ok(json!({
             "serviceName": service_name,
-            "serviceFound": detail.is_some(),
-            "currentStatus": detail.as_ref().map(|d| d.service.status.clone()),
-            "currentVersion": detail.as_ref().map(|d| d.service.current_version.clone()),
-            "openIncidentCount": detail.as_ref().map_or(0, |d| d.active_incidents.len()),
-            "activePgConnections": active_pg_connections,
+            "serviceFound": row.status.is_some(),
+            "currentStatus": row.status,
+            "currentVersion": row.current_version,
+            "openIncidentCount": row.open_incident_count,
+            "activePgConnections": row.active_pg_connections,
             "checkedAt": Utc::now(),
         }))
     }

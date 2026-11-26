@@ -939,24 +939,18 @@ impl ServerHandler for OpsServer {
         }
 
         if uri == "ops://incidents/open" {
-            let open = self
+            let combined = self
                 .store
-                .list_incidents(Some("open"), None)
+                .list_open_incidents()
                 .await
                 .map_err(|err| McpError::internal_error(err.to_string(), None))?;
-            let mitigating = self
-                .store
-                .list_incidents(Some("mitigating"), None)
-                .await
-                .map_err(|err| McpError::internal_error(err.to_string(), None))?;
-            let combined: Vec<_> = open.into_iter().chain(mitigating).collect();
             return json_resource_response(uri, &combined);
         }
 
         if uri == "ops://runbooks" {
             let runbooks = self
                 .store
-                .list_runbooks()
+                .list_runbook_summaries()
                 .await
                 .map_err(|err| McpError::internal_error(err.to_string(), None))?;
             let index: Vec<_> = runbooks

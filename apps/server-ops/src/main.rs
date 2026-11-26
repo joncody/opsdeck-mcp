@@ -98,20 +98,17 @@ async fn otel_trace_middleware(req: Request, next: Next) -> Response {
         .headers()
         .get("mcp-method")
         .and_then(|v| v.to_str().ok())
-        .unwrap_or("")
-        .to_owned();
+        .unwrap_or("");
     let mcp_name = req
         .headers()
         .get("mcp-name")
         .and_then(|v| v.to_str().ok())
-        .unwrap_or("")
-        .to_owned();
+        .unwrap_or("");
     let mcp_service = req
         .headers()
         .get("mcp-param-service")
         .and_then(|v| v.to_str().ok())
-        .unwrap_or("")
-        .to_owned();
+        .unwrap_or("");
 
     let span = tracing::info_span!(
         "server_ops.mcp",
